@@ -3,14 +3,15 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App';
 
-// Import thirdweb provider and Goerli ChainId
+// Importe o ThirdWeb
 import { ThirdwebProvider } from '@thirdweb-dev/react';
 import { ChainId } from '@thirdweb-dev/sdk';
 
-// This is the chainId your dApp will work on.
-const activeChainId = ChainId.Goerli;
+// Inclua que redes você quer dar suporte.
+// 5 = Goerli.
+const activeChainId = ChainId.Mumbai;
 
-// Wrap your app with the thirdweb provider
+// Por último, envolva o App com o thirdweb provider.
 const container = document.getElementById('root');
 const root = createRoot(container);
 root.render(
