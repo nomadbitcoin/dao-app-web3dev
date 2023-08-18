@@ -1,9 +1,20 @@
-import { useAddress, ConnectWallet } from '@thirdweb-dev/react';
+import { useAddress, ConnectWallet, Web3Button, useContract, useNFTBalance } from '@thirdweb-dev/react';
+import { useState, useEffect, useMemo } from 'react';
 
 const App = () => {
   // Use o hook connectWallet que o thirdweb nos dá.
   const address = useAddress();
   console.log("👋 Address:", address);
+  // inicializar o contrato editionDrop
+  const editionDropAddress = "0x5f281928b01f85e47bd5de6fa6fd47fdf3d31d66"
+  const { contract: editionDrop } = useContract(editionDropAddress, "edition-drop");
+
+  // Hook para verificar se o úsuario tem a NFT
+  const { data: nftBalance } = useNFTBalance(editionDrop, address, "0")
+
+  const hasClaimedNFT = useMemo(() => {
+    return nftBalance && nftBalance.gt(0)
+    }, [nftBalance])
 
   // Esse é o caso em que o usuário ainda não conectou sua carteira
   // ao nosso webapp. Deixe ele chamar connectWallet.
@@ -18,12 +29,29 @@ const App = () => {
     );
   }
   
-  // Esse é o caso em que temos o endereço do usuário
-  // o que significa que ele conectou sua carteira ao nosso site!
+  // Renderiza a tela de cunhagem do NFT.
   return (
-    <div className="landing">
-      <h1>👀 carteira conectada, e agora?!</h1>
-    </div>);
-};
+    <div className="mint-nft">
+      <h1>Cunhe seu NFT 🍪 ele mostra que você é membro desta DAO</h1>
+      <div className="btn-hero">
+        <Web3Button
+          contractAddress={editionDropAddress}
+          action={contract => {
+            contract.erc1155.claim(0, 1)
+          }}
+          onSuccess={() => {
+            console.log(`🌊 Successfully Minted! Check it out on OpenSea: https://testnets.opensea.io/assets/${editionDrop.getAddress()}/0`);
+          }}
+          onError={error => {
+            console.error("Failed to mint NFT", error);
+          }}
+        >
+          Mint your NFT (FREE)
+        </Web3Button>
+      </div>
+    </div>
+  );
+
+}
 
 export default App;
