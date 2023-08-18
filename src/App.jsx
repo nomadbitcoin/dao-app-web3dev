@@ -28,6 +28,15 @@ const App = () => {
       </div>
     );
   }
+
+  if (hasClaimedNFT) {
+    return (
+      <div className="member-page">
+        <h1> Bem vindo à MultiplicaDAO</h1>
+        <p>Parabéns por fazer parte dos membros Multiplicadores!</p>
+      </div>
+    )
+   };
   
   // Renderiza a tela de cunhagem do NFT.
   return (
