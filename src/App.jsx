@@ -1,5 +1,6 @@
 import { useAddress, ConnectWallet, Web3Button, useContract, useNFTBalance } from '@thirdweb-dev/react';
 import { useState, useEffect, useMemo } from 'react';
+import { AddressZero } from "@ethersproject/constants";
 
 const App = () => {
   // Use o hook connectWallet que o thirdweb nos dá.
@@ -9,6 +10,7 @@ const App = () => {
   const editionDropAddress = "0x5f281928b01f85e47bd5de6fa6fd47fdf3d31d66"
   const { contract: editionDrop } = useContract(editionDropAddress, "edition-drop");
   const { contract: token } = useContract('0x13DD0AA8cE5b77c8BA6cc81d21Ab31F93eD56081', 'token');
+  const { contract: vote } = useContract("0x3F631d3De33BAeAF8C33E6398f903F2041Dfe25b", "vote");
 
   // Hook para verificar se o úsuario tem a NFT
   const { data: nftBalance } = useNFTBalance(editionDrop, address, "0")
@@ -25,6 +27,57 @@ const App = () => {
   const shortenAddress = (str) => {
     return str.substring(0, 6) + "..." + str.substring(str.length - 4);
   };
+
+  const [proposals, setProposals] = useState([]);
+  const [isVoting, setIsVoting] = useState(false);
+  const [hasVoted, setHasVoted] = useState(false);
+
+  // Recupere todas as propostas existentes no contrato. 
+  useEffect(() => {
+    if (!hasClaimedNFT) {
+      return;
+    }
+    // Uma chamada simples para vote.getAll() para pegar as propostas.
+    const getAllProposals = async () => {
+      try {
+        const proposals = await vote.getAll();
+        setProposals(proposals);
+        console.log("🌈 Propostas:", proposals);
+      } catch (error) {
+        console.log("falha ao buscar propostas", error);
+      }
+    };
+    getAllProposals();
+  }, [hasClaimedNFT, vote]);
+
+  // Nós também precisamos checar se o usuário já votou.
+  useEffect(() => {
+    if (!hasClaimedNFT) {
+      return;
+    }
+
+    // Se nós não tivermos terminado de recuperar as propostas do useEffect acima
+    // então ainda nao podemos checar se o usuário votou!
+    if (!proposals.length) {
+      return;
+    }
+
+    const checkIfUserHasVoted = async () => {
+      try {
+        const hasVoted = await vote.hasVoted(proposals[0].proposalId, address);
+        setHasVoted(hasVoted);
+        if (hasVoted) {
+          console.log("🥵 Usuário já votou");
+        } else {
+          console.log("🙂 Usuário ainda não votou");
+        }
+      } catch (error) {
+        console.error("Falha ao verificar se carteira já votou", error);
+      }
+    };
+    checkIfUserHasVoted();
+
+  }, [hasClaimedNFT, proposals, address, vote]);
 
   // Esse useEffect pega todos os endereços dos nosso membros detendo nosso NFT.
   useEffect(() => {
@@ -118,14 +171,143 @@ const App = () => {
                       <td>{shortenAddress(member.address)}</td>
                       <td>{member.tokenAmount}</td>
                     </tr>
-                  );
+                  )
                 })}
               </tbody>
             </table>
           </div>
+          <div>
+            <h2>Propostas Ativas</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+
+                //antes de fazer as coisas async, desabilitamos o botão para previnir duplo clique
+                setIsVoting(true)
+
+                // pega os votos no formulário 
+                const votes = proposals.map((proposal) => {
+                  const voteResult = {
+                    proposalId: proposal.proposalId,
+                    //abstenção é a escolha padrão
+                    vote: 2,
+                  }
+                  proposal.votes.forEach((vote) => {
+                    const elem = document.getElementById(
+                      proposal.proposalId + "-" + vote.type
+                    )
+
+                    if (elem.checked) {
+                      voteResult.vote = vote.type
+                      return
+                    }
+                  })
+                  return voteResult
+                })
+
+                // certificamos que o usuário delega seus tokens para o voto
+                try {
+                  //verifica se a carteira precisa delegar os tokens antes de votar
+                  const delegation = await token.getDelegationOf(address)
+                  // se a delegação é o endereço 0x0 significa que eles não delegaram seus tokens de governança ainda
+                  if (delegation === AddressZero) {
+                    //se não delegaram ainda, teremos que delegar eles antes de votar
+                    await token.delegateTo(address)
+                  }
+                  // então precisamos votar nas propostas
+                  try {
+                    await Promise.all(
+                      votes.map(async ({ proposalId, vote: _vote }) => {
+                        // antes de votar, precisamos saber se a proposta está aberta para votação
+                        // pegamos o último estado da proposta
+                        const proposal = await vote.get(proposalId)
+                        // verifica se a proposta está aberta para votação (state === 1 significa está aberta)
+                        if (proposal.state === 1) {
+                          // se está aberta, então vota nela
+                          return vote.vote(proposalId, _vote)
+                        }
+                        // se a proposta não está aberta, returna vazio e continua
+                        return
+                      })
+                    )
+                    try {
+                      // se alguma proposta está pronta para ser executada, fazemos isso
+                      // a proposta está pronta para ser executada se o estado é igual a 4
+                      await Promise.all(
+                        votes.map(async ({ proposalId }) => {
+                          // primeiro pegamos o estado da proposta novamente, dado que podemos ter acabado de votar
+                          const proposal = await vote.get(proposalId)
+
+                          //se o estado é igual a 4 (pronta para ser executada), executamos a proposta
+                          if (proposal.state === 4) {
+                            return vote.execute(proposalId)
+                          }
+                        })
+                      )
+                      // se chegamos aqui, significa que votou com sucesso, então definimos "hasVoted" como true
+                      setHasVoted(true)
+                      console.log("votado com sucesso")
+                    } catch (err) {
+                      console.error("falha ao executar votos", err)
+                    }
+                  } catch (err) {
+                    console.error("falha ao votar", err)
+                  }
+                } catch (err) {
+                  console.error("falha ao delegar tokens")
+                } finally {
+                  // de qualquer modo, volta isVoting para false para habilitar o botão novamente
+                  setIsVoting(false)
+                }
+              }}
+            >
+              {proposals.map((proposal) => (
+                <div key={proposal.proposalId} className="card">
+                  <h5>{proposal.description}</h5>
+                  <div>
+                    {proposal.votes.map(({ type, label }) => {
+                      const translations = {
+                        Against: "Contra",
+                        For: "A favor",
+                        Abstain: "Abstenção",
+                      }
+                      return (
+                        <div key={type}>
+                          <input
+                            type="radio"
+                            id={proposal.proposalId + "-" + type}
+                            name={proposal.proposalId}
+                            value={type}
+                            //valor padrão "abster" vem habilitado
+                            defaultChecked={type === 2}
+                          />
+                          <label htmlFor={proposal.proposalId + "-" + type}>
+                            {translations[label]}
+                          </label>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              <button disabled={isVoting || hasVoted} type="submit">
+                {isVoting
+                  ? "Votando..."
+                  : hasVoted
+                    ? "Você já votou"
+                    : "Submeter votos"}
+              </button>
+              {!hasVoted && (
+                <small>
+                  Isso irá submeter várias transações que você precisará assinar.
+                </small>
+              )}
+            </form>
+          </div>
         </div>
       </div>
-    );
+    )
   };
   
   // Renderiza a tela de cunhagem do NFT.
